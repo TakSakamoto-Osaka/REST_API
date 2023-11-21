@@ -1,0 +1,37 @@
+version: '3.5'
+services:
+  mariadb-database:
+    container_name: 'api-db'
+    image: mariadb:10.1.48
+    ports:
+      - "13306:3306"
+    restart: always
+    environment:
+      TZ: Asia/Tokyo
+      MYSQL_ROOT_PASSWORD: samurai
+    volumes:
+      - api-db-store:/var/lib/mysql
+    command: >
+      mysqld
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+
+  fastapi-srv:
+    container_name: 'api-demo'
+    image: api-demo
+    ports:
+      - "8000:80"
+    volumes:
+      - ./:/root/prog/
+    tty: true
+    restart: always
+    depends_on:
+      - mariadb-database 
+
+networks:
+  default:
+    name: api-network
+    driver: bridge
+
+volumes:
+  api-db-store: 
