@@ -7,9 +7,11 @@ from sqlalchemy.types import Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+from fastapi_jwt_auth import AuthJWT
+
 from pydantic import BaseModel, parse_obj_as
 from starlette.middleware.cors import CORSMiddleware
 
@@ -45,6 +47,30 @@ class Item(BaseModel):
 # FAST API処理
 app = FastAPI()
 
+# ユーザー格納配列
+users = [{'username':'user01','password':'samurai'}]
+
+class Settings(BaseModel):
+    authjwt_secret_key:str = '6c14d68e59eab2ff08bd413cfa0453ba18ac7848f25cb040'
+    
+@AuthJWT.load_config
+def get_config():
+    return Settings()
+
+
+class UserLogin(BaseModel):
+    username:str
+    password:str
+    
+    class Config:
+        schema_extra = {
+            'example': {
+                'username': 'user_name',
+                'password': 'password'
+            }
+        }
+
+
 # CORS対策設定
 app.add_middleware(
     CORSMiddleware,
@@ -55,6 +81,17 @@ app.add_middleware(
 )
 
 #
+# 認証済かを判定するデコレータ
+#
+def is_jwt_authorized(Authorize: AuthJWT=Depends()):
+    try:
+        Authorize.jwt_required()
+        
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Invalid Token")
+
+
+#
 # TOPフォルダ
 #
 @app.get("/")
@@ -62,21 +99,43 @@ def top():
     return "Hello World"
 
 #
+# ログイン
+#
+@app.post('/login')
+def login(user:UserLogin, Authorize:AuthJWT=Depends()):
+    for u in users:
+        if ( u['username']==user.username ) and (u['password']==user.password):
+            access_token = Authorize.create_access_token(subject=user.username)
+            
+            return JSONResponse(status_code=200, content={'access_token': access_token})
+        
+    return JSONResponse(status_code=401, content={'args':'Invalid User or Password'})
+        
+
+#
 # item データ取得
 #
 @app.get("/api/item/{id}", response_model=Item)
-async def get_item(id: int):
+async def get_item(id: int, Authorize:AuthJWT=Depends()):
     try:
-        val = session.query(ItemModel).filter(ItemModel.ID == id).first()        # SQLAlchemy経由でDBからデータ取得
-        item = parse_obj_as(Item,val)                                           # SQLAlchemyオブジェクトからPydanticオブジェクトに変換
+        is_jwt_authorized(Authorize) 
+        
+        val = session.query(ItemModel).filter(ItemModel.ID == id).first()   # SQLAlchemy経由でDBからデータ取得
+        item = parse_obj_as(Item,val)                                       # SQLAlchemyオブジェクトからPydanticオブジェクトに変換
    
         json_data = jsonable_encoder(item)
         
         session.commit()
     
-        return JSONResponse(content=json_data)
-    except:
+        return JSONResponse(status_code=200, content=json_data)
+   
+    except HTTPException as he:
+        return JSONResponse(status_code=he.status_code, content={"args": he.detail})
+    
+    except Exception as e:
         session.rollback()
+        return JSONResponse(status_code=500, content={e.args})
+        
     finally:
         if session is not None:
             session.close()
@@ -86,8 +145,10 @@ async def get_item(id: int):
 # item データリスト取得
 #
 @app.get("/api/items/{company}", response_model=List[Item])
-async def get_items(company: str, all: bool = False):
+async def get_items(company: str, all: bool = False, Authorize: AuthJWT=Depends()):
     try:
+        is_jwt_authorized(Authorize) 
+        
         if all == True:
             list = session.query(ItemModel).all()
         else:
@@ -99,8 +160,14 @@ async def get_items(company: str, all: bool = False):
         session.commit()
     
         return JSONResponse(content=json_data)
-    except:
+    
+    except HTTPException as he:
+        return JSONResponse(status_code=he.status_code, content={"args": he.detail})
+    
+    except Exception as e:
         session.rollback()
+        return JSONResponse(status_code=500, content={e.args})
+    
     finally:
         if session is not None:
             session.close()
@@ -109,8 +176,10 @@ async def get_items(company: str, all: bool = False):
 # item データ追加
 #
 @app.post("/api/item/")
-async def post_item(item: Item):
+async def post_item(item: Item, Authorize:AuthJWT=Depends()):
     try:
+        is_jwt_authorized(Authorize) 
+        
         item_model         = ItemModel()
         
         item_model.Name    = item.Name
@@ -122,8 +191,14 @@ async def post_item(item: Item):
         session.commit()
     
         return JSONResponse(content='')
-    except:
+    
+    except HTTPException as he:
+        return JSONResponse(status_code=he.status_code, content={"args": he.detail})
+    
+    except Exception as e:
         session.rollback()
+        return JSONResponse(status_code=500, content={e.args})
+   
     finally:
         if session is not None:
             session.close()
@@ -133,8 +208,10 @@ async def post_item(item: Item):
 # item データ変更
 #
 @app.put("/api/item/")
-async def put_item(item: Item):
+async def put_item(item: Item, Authorize:AuthJWT=Depends()):
     try:
+        is_jwt_authorized(Authorize) 
+        
         id = item.ID
    
         val: ItemModel = session.query(ItemModel).filter(ItemModel.ID == id).first()
@@ -148,24 +225,39 @@ async def put_item(item: Item):
         session.commit()
     
         return JSONResponse(content='')
-    except:
+    
+    except HTTPException as he:
+        return JSONResponse(status_code=he.status_code, content={"args": he.detail})
+    
+    except Exception as e:
         session.rollback()
+        return JSONResponse(status_code=500, content={e.args})
+    
     finally:
         if session is not None:
             session.close()
+
 
 #
 # item データ削除:
 #
 @app.delete("/api/item/{id}")
-async def delete_item(id: int):
+async def delete_item(id: int, Authorize:AuthJWT=Depends()):
     try:
+        is_jwt_authorized(Authorize) 
+        
         session.query(ItemModel).filter(ItemModel.ID == id).delete()
         session.commit()
     
         return JSONResponse(content='')
-    except:
+    
+    except HTTPException as he:
+        return JSONResponse(status_code=he.status_code, content={"args": he.detail})
+    
+    except Exception as e:
         session.rollback()
+        return JSONResponse(status_code=500, content={e.args})
+    
     finally:
         if session is not None:
             session.close()

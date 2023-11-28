@@ -21,8 +21,8 @@ services:
     image: api-demo
     ports:
       - "8000:80"
-    volumes:
-      - ./:/root/prog/
+    # volumes:
+    #  - ./:/root/prog/
     tty: true
     restart: always
     depends_on:
